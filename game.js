@@ -86,12 +86,10 @@ function create() {
                 let money = moneyBags.create(x, y, 'money');
                 money.setScale(24 / money.width);
                 money.body.setSize(money.width * 0.3, money.height * 0.3);
-                money.setBlendMode(Phaser.BlendModes.MULTIPLY);
             } else if (maze[r][c] === 3) {
                 let diamond = diamonds.create(x, y, 'diamond');
                 diamond.setScale(30 / diamond.width);
                 diamond.body.setSize(diamond.width * 0.3, diamond.height * 0.3);
-                diamond.setBlendMode(Phaser.BlendModes.MULTIPLY);
             }
         }
     }
@@ -105,7 +103,6 @@ function create() {
     // Tight hitbox to ignore the white background padding
     player.body.setSize(player.width * 0.4, player.height * 0.4);
     player.body.setOffset(player.width * 0.3, player.height * 0.3);
-    player.setBlendMode(Phaser.BlendModes.MULTIPLY);
 
     // Police
     policeCars = this.physics.add.group();
@@ -127,7 +124,6 @@ function create() {
         // Tight hitbox for police too
         police.body.setSize(police.width * 0.5, police.height * 0.5);
         police.body.setOffset(police.width * 0.25, police.height * 0.25);
-        police.setBlendMode(Phaser.BlendModes.MULTIPLY);
     });
 
     // ... (rest of UI and inputs)
