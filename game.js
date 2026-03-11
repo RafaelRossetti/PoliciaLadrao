@@ -83,16 +83,29 @@ function create() {
                 this.physics.add.existing(wall, true);
                 walls.add(wall);
             } else if (maze[r][c] === 2) {
-                let money = moneyBags.create(x, y, 'money').setScale(0.05);
+                let money = moneyBags.create(x, y, 'money');
+                money.setScale(24 / money.width);
+                money.body.setSize(money.width * 0.3, money.height * 0.3);
+                money.setBlendMode(Phaser.BlendModes.MULTIPLY);
             } else if (maze[r][c] === 3) {
-                let diamond = diamonds.create(x, y, 'diamond').setScale(0.05);
+                let diamond = diamonds.create(x, y, 'diamond');
+                diamond.setScale(30 / diamond.width);
+                diamond.body.setSize(diamond.width * 0.3, diamond.height * 0.3);
+                diamond.setBlendMode(Phaser.BlendModes.MULTIPLY);
             }
         }
     }
 
     // Player
-    player = this.physics.add.sprite(OFFSET_X + 8 * TILE_SIZE, OFFSET_Y + 7 * TILE_SIZE, 'thief').setScale(0.08);
+    player = this.physics.add.sprite(OFFSET_X + 8 * TILE_SIZE, OFFSET_Y + 7 * TILE_SIZE, 'thief');
+    // Scale to fit nicely in a 40px tile (using 32px for the car)
+    const playerScale = 32 / player.width;
+    player.setScale(playerScale);
     player.setCollideWorldBounds(true);
+    // Tight hitbox to ignore the white background padding
+    player.body.setSize(player.width * 0.4, player.height * 0.4);
+    player.body.setOffset(player.width * 0.3, player.height * 0.3);
+    player.setBlendMode(Phaser.BlendModes.MULTIPLY);
 
     // Police
     policeCars = this.physics.add.group();
@@ -103,13 +116,21 @@ function create() {
     const behaviors = ['Chaser', 'Strategist', 'Patroller', 'Chaotic'];
     
     spawnPoints.forEach((pos, index) => {
-        let police = policeCars.create(OFFSET_X + pos.x * TILE_SIZE, OFFSET_Y + pos.y * TILE_SIZE, 'police').setScale(0.08);
+        let police = policeCars.create(OFFSET_X + pos.x * TILE_SIZE, OFFSET_Y + pos.y * TILE_SIZE, 'police');
+        const policeScale = 32 / police.width;
+        police.setScale(policeScale);
         police.behavior = behaviors[index];
         police.speed = 100;
         police.setBounce(1);
         police.setCollideWorldBounds(true);
         police.lastDecisionTime = 0;
+        // Tight hitbox for police too
+        police.body.setSize(police.width * 0.5, police.height * 0.5);
+        police.body.setOffset(police.width * 0.25, police.height * 0.25);
+        police.setBlendMode(Phaser.BlendModes.MULTIPLY);
     });
+
+    // ... (rest of UI and inputs)
 
     // UI
     scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '32px', fill: '#fff' });
