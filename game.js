@@ -1,48 +1,17 @@
 /**
- * Urban Heist - Main Game Logic
+ * Urban Heist - Polícia e Ladrão
+ * All sprites are drawn programmatically for guaranteed visibility.
  */
 
-const config = {
-    type: Phaser.AUTO,
-    width: 800,
-    height: 600,
-    parent: 'game-container',
-    physics: {
-        default: 'arcade',
-        arcade: {
-            gravity: { y: 0 },
-            debug: false
-        }
-    },
-    scene: {
-        preload: preload,
-        create: create,
-        update: update
-    }
-};
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
+const TILE  = 40;
+const COLS  = 18;
+const ROWS  = 14;
+const OX    = 20;   // offset X
+const OY    = 60;   // offset Y (below HUD)
 
-const game = new Phaser.Game(config);
-
-let player;
-let policeCars;
-let moneyBags;
-let diamonds;
-let walls;
-let cursors;
-let score = 0;
-let lives = 3;
-let scoreText;
-let livesText;
-let isPanicMode = false;
-let panicTimer;
-
-// Map constants
-const TILE_SIZE = 40;
-const OFFSET_X = 40;
-const OFFSET_Y = 80;
-
-// 0: Road, 1: Wall, 2: Money Bag, 3: Diamond
-const maze = [
+// 0=road, 1=wall, 2=money, 3=diamond
+const MAP = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
     [1,3,2,2,2,2,2,2,1,1,2,2,2,2,2,2,3,1],
     [1,2,1,1,2,1,1,2,1,1,2,1,1,2,1,1,2,1],
@@ -59,221 +28,387 @@ const maze = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 
+// ─── GAME STATE ──────────────────────────────────────────────────────────────
+let player, policeCars, moneyGroup, diamondGroup, wallGroup;
+let cursors, wasd;
+let scoreText, livesText, highScoreText;
+let score = 0, lives = 3, highScore = 0;
+let isPanic = false, panicTimer = null;
+let gameActive = true;
+
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+const config = {
+    type: Phaser.AUTO,
+    width: OX * 2 + COLS * TILE,
+    height: OY + ROWS * TILE + 10,
+    backgroundColor: '#111111',
+    parent: 'game-container',
+    physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
+    scene: { preload, create, update }
+};
+
+const game = new Phaser.Game(config);
+
+// ─── TEXTURE HELPERS ─────────────────────────────────────────────────────────
+
+function makeThiefTexture(scene) {
+    const g = scene.make.graphics({ x: 0, y: 0, add: false });
+    // Car body — dark with bright trim
+    g.fillStyle(0x222222); g.fillRoundedRect(4, 2, 24, 36, 4);
+    g.fillStyle(0x00ffcc); g.fillRect(6, 4, 20, 6);   // windshield
+    g.fillStyle(0x00ffcc); g.fillRect(6, 30, 20, 6);  // rear window
+    g.fillStyle(0xff4400); g.fillRect(5, 32, 6, 4);   // tail lights L
+    g.fillStyle(0xff4400); g.fillRect(21, 32, 6, 4);  // tail lights R
+    g.fillStyle(0xffffff); g.fillRect(5, 2, 6, 4);    // headlights L
+    g.fillStyle(0xffffff); g.fillRect(21, 2, 6, 4);   // headlights R
+    g.generateTexture('thief', 32, 40);
+    g.destroy();
+}
+
+function makePoliceTexture(scene) {
+    const g = scene.make.graphics({ x: 0, y: 0, add: false });
+    // Body white/blue
+    g.fillStyle(0xdddddd); g.fillRoundedRect(4, 2, 24, 36, 4);
+    g.fillStyle(0x0044ff); g.fillRect(4, 14, 24, 12); // stripe
+    // Lights on top
+    g.fillStyle(0xff0000); g.fillRect(7,  14, 8, 5);
+    g.fillStyle(0x0088ff); g.fillRect(17, 14, 8, 5);
+    // Windows
+    g.fillStyle(0x88ccff); g.fillRect(6, 4, 20, 8);
+    g.fillStyle(0x88ccff); g.fillRect(6, 28, 20, 6);
+    // Tail / head lights
+    g.fillStyle(0xff4400); g.fillRect(5, 32, 6, 4);
+    g.fillStyle(0xff4400); g.fillRect(21, 32, 6, 4);
+    g.fillStyle(0xffffff); g.fillRect(5, 2, 6, 4);
+    g.fillStyle(0xffffff); g.fillRect(21, 2, 6, 4);
+    g.generateTexture('police', 32, 40);
+    g.destroy();
+}
+
+function makePolicePanicTexture(scene) {
+    const g = scene.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0x5500aa); g.fillRoundedRect(4, 2, 24, 36, 4);
+    g.fillStyle(0xaa00ff); g.fillRect(4, 14, 24, 12);
+    g.fillStyle(0xffffff); g.fillRect(7, 14, 8, 5);
+    g.fillStyle(0xffffff); g.fillRect(17, 14, 8, 5);
+    g.fillStyle(0x8800ff); g.fillRect(6, 4, 20, 8);
+    g.fillStyle(0x8800ff); g.fillRect(6, 28, 20, 6);
+    g.generateTexture('police_panic', 32, 40);
+    g.destroy();
+}
+
+function makeMoneyTexture(scene) {
+    const g = scene.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0xffcc00); g.fillCircle(10, 10, 9);
+    g.fillStyle(0x226600); g.fillCircle(10, 10, 7);
+    g.fillStyle(0xffcc00);
+    // Draw $ sign with rectangles
+    g.fillRect(8, 3, 4, 14);
+    g.fillRect(6, 3, 8, 3);
+    g.fillRect(6, 9, 8, 3);
+    g.fillRect(6, 14, 8, 3);
+    g.generateTexture('money', 20, 20);
+    g.destroy();
+}
+
+function makeDiamondTexture(scene) {
+    const g = scene.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0x00eeff);
+    g.fillTriangle(12, 0, 24, 10, 0, 10);
+    g.fillStyle(0x0088cc);
+    g.fillTriangle(0, 10, 12, 24, 24, 10);
+    g.fillStyle(0xaaffff);
+    g.fillTriangle(12, 0, 18, 10, 6, 10);
+    g.generateTexture('diamond', 24, 24);
+    g.destroy();
+}
+
+// ─── PHASER SCENE ────────────────────────────────────────────────────────────
+
 function preload() {
-    this.load.image('thief', 'assets/thief.png');
-    this.load.image('police', 'assets/police.png');
-    this.load.image('money', 'assets/money.png');
-    this.load.image('diamond', 'assets/diamond.png');
+    // No external assets needed — all drawn in create()
 }
 
 function create() {
-    walls = this.physics.add.staticGroup();
-    moneyBags = this.physics.add.group();
-    diamonds = this.physics.add.group();
+    // Build textures
+    makeThiefTexture(this);
+    makePoliceTexture(this);
+    makePolicePanicTexture(this);
+    makeMoneyTexture(this);
+    makeDiamondTexture(this);
 
-    // Setup Maze
-    for (let r = 0; r < maze.length; r++) {
-        for (let c = 0; c < maze[r].length; c++) {
-            const x = OFFSET_X + c * TILE_SIZE;
-            const y = OFFSET_Y + r * TILE_SIZE;
+    // Groups
+    wallGroup    = this.physics.add.staticGroup();
+    moneyGroup   = this.physics.add.staticGroup();
+    diamondGroup = this.physics.add.staticGroup();
 
-            if (maze[r][c] === 1) {
-                // Draw a simple wall rectangle
-                let wall = this.add.rectangle(x, y, TILE_SIZE, TILE_SIZE, 0x444444);
+    // Build map
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const cx = OX + c * TILE + TILE / 2;
+            const cy = OY + r * TILE + TILE / 2;
+            const cell = MAP[r][c];
+
+            if (cell === 1) {
+                // Wall — draw a building block
+                const wall = this.add.rectangle(cx, cy, TILE, TILE, 0x3a3a5c);
+                // Inner shadow for depth
+                const inner = this.add.rectangle(cx - 2, cy - 2, TILE - 6, TILE - 6, 0x2a2a46);
                 this.physics.add.existing(wall, true);
-                walls.add(wall);
-            } else if (maze[r][c] === 2) {
-                let money = moneyBags.create(x, y, 'money');
-                money.setScale(24 / money.width);
-                money.body.setSize(money.width * 0.3, money.height * 0.3);
-            } else if (maze[r][c] === 3) {
-                let diamond = diamonds.create(x, y, 'diamond');
-                diamond.setScale(30 / diamond.width);
-                diamond.body.setSize(diamond.width * 0.3, diamond.height * 0.3);
+                wallGroup.add(wall);
+            } else if (cell === 0) {
+                // Empty garage/zone — darker road
+                this.add.rectangle(cx, cy, TILE, TILE, 0x0e0e0e);
+            } else {
+                // Road tile
+                this.add.rectangle(cx, cy, TILE, TILE, 0x1a1a1a);
+                // Road lane marks
+                if (r > 0 && r < ROWS - 1 && c > 0 && c < COLS - 1) {
+                    this.add.rectangle(cx, cy, 2, 10, 0x333333);
+                }
+            }
+
+            if (cell === 2) {
+                const m = this.physics.add.staticImage(cx, cy, 'money');
+                moneyGroup.add(m);
+            } else if (cell === 3) {
+                const d = this.physics.add.staticImage(cx, cy, 'diamond');
+                diamondGroup.add(d);
+                // Pulsing tween
+                this.tweens.add({ targets: d, scaleX: 1.3, scaleY: 1.3, duration: 700, yoyo: true, repeat: -1 });
             }
         }
     }
 
     // Player
-    player = this.physics.add.sprite(OFFSET_X + 8 * TILE_SIZE, OFFSET_Y + 7 * TILE_SIZE, 'thief');
-    // Scale to fit nicely in a 40px tile (using 32px for the car)
-    const playerScale = 32 / player.width;
-    player.setScale(playerScale);
+    const startX = OX + 8 * TILE + TILE / 2;
+    const startY = OY + 7 * TILE + TILE / 2;
+    player = this.physics.add.sprite(startX, startY, 'thief');
     player.setCollideWorldBounds(true);
-    // Tight hitbox to ignore the white background padding
-    player.body.setSize(player.width * 0.4, player.height * 0.4);
-    player.body.setOffset(player.width * 0.3, player.height * 0.3);
+    player.body.setSize(20, 28);
+    player.setDepth(10);
+    player._startX = startX;
+    player._startY = startY;
 
     // Police
     policeCars = this.physics.add.group();
-    const spawnPoints = [
-        { x: 1, y: 1 }, { x: 16, y: 1 }, { x: 1, y: 12 }, { x: 16, y: 12 }
+    const spawns = [
+        { col: 1,  row: 1,  behavior: 'Chaser'     },
+        { col: 16, row: 1,  behavior: 'Strategist'  },
+        { col: 1,  row: 12, behavior: 'Patroller'   },
+        { col: 16, row: 12, behavior: 'Chaotic'     },
     ];
 
-    const behaviors = ['Chaser', 'Strategist', 'Patroller', 'Chaotic'];
-    
-    spawnPoints.forEach((pos, index) => {
-        let police = policeCars.create(OFFSET_X + pos.x * TILE_SIZE, OFFSET_Y + pos.y * TILE_SIZE, 'police');
-        const policeScale = 32 / police.width;
-        police.setScale(policeScale);
-        police.behavior = behaviors[index];
-        police.speed = 100;
-        police.setBounce(1);
-        police.setCollideWorldBounds(true);
-        police.lastDecisionTime = 0;
-        // Tight hitbox for police too
-        police.body.setSize(police.width * 0.5, police.height * 0.5);
-        police.body.setOffset(police.width * 0.25, police.height * 0.25);
+    // Patrol waypoints for Patroller
+    const patrolWaypoints = [
+        { col: 1, row: 1 }, { col: 7, row: 1 }, { col: 7, row: 5 },
+        { col: 1, row: 5 }, { col: 1, row: 9 }, { col: 7, row: 9 },
+    ];
+
+    spawns.forEach(({ col, row, behavior }) => {
+        const px = OX + col * TILE + TILE / 2;
+        const py = OY + row * TILE + TILE / 2;
+        const p = policeCars.create(px, py, 'police');
+        p.setCollideWorldBounds(true);
+        p.body.setSize(20, 28);
+        p.setDepth(9);
+        p.speed    = 90;
+        p.behavior = behavior;
+        p.nextDecision = 0;
+        p.waypointIdx  = 0;
+        p.patrolWPs    = patrolWaypoints;
+        // Siren animation
+        this.tweens.add({
+            targets: p,
+            alpha: 0.7,
+            duration: 400,
+            yoyo: true,
+            repeat: -1
+        });
     });
 
-    // ... (rest of UI and inputs)
+    // HUD background
+    this.add.rectangle(config.width / 2, 30, config.width, 58, 0x000000).setDepth(20);
+    this.add.rectangle(config.width / 2, 59, config.width, 2, 0x00ffcc).setDepth(21);
 
-    // UI
-    scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '32px', fill: '#fff' });
-    livesText = this.add.text(600, 16, 'Lives: 3', { fontSize: '32px', fill: '#fff' });
-
-    // Inputs
-    cursors = this.input.keyboard.createCursorKeys();
-    this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+    scoreText     = this.add.text(16, 10, 'SCORE: 0',      { font: 'bold 20px monospace', fill: '#ffffff' }).setDepth(22);
+    highScoreText = this.add.text(16, 35, 'BEST: 0',       { font: '16px monospace',      fill: '#888888' }).setDepth(22);
+    livesText     = this.add.text(config.width - 16, 10, '❤ ❤ ❤', { font: '20px monospace', fill: '#ff4444' }).setOrigin(1, 0).setDepth(22);
+    this.add.text(config.width / 2, 22, 'URBAN HEIST', { font: 'bold 18px monospace', fill: '#00ffcc' }).setOrigin(0.5).setDepth(22);
 
     // Collisions
-    this.physics.add.collider(player, walls);
-    this.physics.add.collider(policeCars, walls);
-    this.physics.add.overlap(player, moneyBags, collectMoney, null, this);
-    this.physics.add.overlap(player, diamonds, activatePanicMode, null, this);
-    this.physics.add.overlap(player, policeCars, handlePoliceCollision, null, this);
+    this.physics.add.collider(player,     wallGroup);
+    this.physics.add.collider(policeCars, wallGroup);
+
+    this.physics.add.overlap(player, moneyGroup,   collectMoney,        null, this);
+    this.physics.add.overlap(player, diamondGroup, collectDiamond,      null, this);
+    this.physics.add.overlap(player, policeCars,   handlePoliceContact, null, this);
+
+    // Input
+    cursors = this.input.keyboard.createCursorKeys();
+    wasd    = this.input.keyboard.addKeys('W,A,S,D');
+
+    // Store scene ref globally for helper functions
+    this._scene = this;
 }
 
-function update(time, delta) {
-    if (lives <= 0) return;
+function update(time) {
+    if (!gameActive) return;
 
-    // Player Movement
+    // ── Player movement ──────────────────────────────────────────────────────
     player.setVelocity(0);
-    const speed = isPanicMode ? 200 : 150;
+    const spd = isPanic ? 220 : 160;
 
-    if (cursors.left.isDown || this.wasd.A.isDown) {
-        player.setVelocityX(-speed);
-        player.setAngle(-90);
-    } else if (cursors.right.isDown || this.wasd.D.isDown) {
-        player.setVelocityX(speed);
-        player.setAngle(90);
-    } else if (cursors.up.isDown || this.wasd.W.isDown) {
-        player.setVelocityY(-speed);
-        player.setAngle(0);
-    } else if (cursors.down.isDown || this.wasd.S.isDown) {
-        player.setVelocityY(speed);
-        player.setAngle(180);
-    }
+    if (cursors.left.isDown  || wasd.A.isDown) { player.setVelocityX(-spd); player.setAngle(-90); }
+    else if (cursors.right.isDown || wasd.D.isDown) { player.setVelocityX(spd);  player.setAngle(90);  }
+    else if (cursors.up.isDown    || wasd.W.isDown) { player.setVelocityY(-spd); player.setAngle(0);   }
+    else if (cursors.down.isDown  || wasd.S.isDown) { player.setVelocityY(spd);  player.setAngle(180); }
 
-    // Police AI
-    policeCars.getChildren().forEach(police => {
-        if (time > police.lastDecisionTime + 500) {
-            updatePoliceAI(this, police, player, time);
-            police.lastDecisionTime = time;
+    // ── Police AI ────────────────────────────────────────────────────────────
+    policeCars.getChildren().forEach(p => {
+        if (!p.active) return;
+
+        // Switch texture based on panic mode
+        if (isPanic) {
+            if (p.texture.key !== 'police_panic') p.setTexture('police_panic');
+        } else {
+            if (p.texture.key !== 'police') p.setTexture('police');
+        }
+
+        if (time < p.nextDecision) return;
+        p.nextDecision = time + 600;
+
+        if (isPanic) {
+            // Flee from player
+            const ang = Phaser.Math.Angle.Between(p.x, p.y, player.x, player.y);
+            p.setVelocity(-Math.cos(ang) * p.speed, -Math.sin(ang) * p.speed);
+        } else {
+            switch (p.behavior) {
+                case 'Chaser': {
+                    const ang = Phaser.Math.Angle.Between(p.x, p.y, player.x, player.y);
+                    p.setVelocity(Math.cos(ang) * p.speed, Math.sin(ang) * p.speed);
+                    break;
+                }
+                case 'Strategist': {
+                    const tx = player.x + player.body.velocity.x * 1.5;
+                    const ty = player.y + player.body.velocity.y * 1.5;
+                    const ang = Phaser.Math.Angle.Between(p.x, p.y, tx, ty);
+                    p.setVelocity(Math.cos(ang) * p.speed, Math.sin(ang) * p.speed);
+                    break;
+                }
+                case 'Patroller': {
+                    const wp = p.patrolWPs[p.waypointIdx];
+                    const wx = OX + wp.col * TILE + TILE / 2;
+                    const wy = OY + wp.row * TILE + TILE / 2;
+                    if (Phaser.Math.Distance.Between(p.x, p.y, wx, wy) < TILE) {
+                        p.waypointIdx = (p.waypointIdx + 1) % p.patrolWPs.length;
+                    }
+                    const ang = Phaser.Math.Angle.Between(p.x, p.y, wx, wy);
+                    p.setVelocity(Math.cos(ang) * p.speed, Math.sin(ang) * p.speed);
+                    break;
+                }
+                case 'Chaotic': {
+                    const dirs = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+                    const ang  = dirs[Phaser.Math.Between(0, 3)];
+                    p.setVelocity(Math.cos(ang) * p.speed, Math.sin(ang) * p.speed);
+                    break;
+                }
+            }
+        }
+
+        // Rotate police toward velocity
+        const vx = p.body.velocity.x, vy = p.body.velocity.y;
+        if (vx !== 0 || vy !== 0) {
+            p.setAngle(Phaser.Math.RadToDeg(Math.atan2(vy, vx)) + 90);
         }
     });
 }
 
-function updatePoliceAI(scene, police, player, time) {
-    if (isPanicMode) {
-        const angle = Phaser.Math.Angle.Between(police.x, police.y, player.x, player.y);
-        police.setVelocity(-Math.cos(angle) * police.speed, -Math.sin(angle) * police.speed);
-        police.setTint(0x0000ff);
-        return;
-    } else {
-        police.clearTint();
-    }
-
-    const angleToPlayer = Phaser.Math.Angle.Between(police.x, police.y, player.x, player.y);
-    
-    switch (police.behavior) {
-        case 'Chaser':
-            scene.physics.velocityFromAngle(Phaser.Math.RadToDeg(angleToPlayer), police.speed, police.body.velocity);
-            break;
-        case 'Strategist':
-            const targetX = player.x + player.body.velocity.x * 2;
-            const targetY = player.y + player.body.velocity.y * 2;
-            const angleStrategist = Phaser.Math.Angle.Between(police.x, police.y, targetX, targetY);
-            scene.physics.velocityFromAngle(Phaser.Math.RadToDeg(angleStrategist), police.speed, police.body.velocity);
-            break;
-        case 'Chaotic':
-            if (Math.random() > 0.95) {
-                const randomAngle = Math.random() * 360;
-                scene.physics.velocityFromAngle(randomAngle, police.speed, police.body.velocity);
-            }
-            break;
-        case 'Patroller':
-            if (police.body.velocity.x === 0 && police.body.velocity.y === 0) {
-                const randomAngle = [0, 90, 180, 270][Math.floor(Math.random() * 4)];
-                scene.physics.velocityFromAngle(randomAngle, police.speed, police.body.velocity);
-            }
-            break;
-    }
-
-    // Set rotation based on velocity
-    if (police.body.velocity.x !== 0 || police.body.velocity.y !== 0) {
-        police.rotation = Phaser.Math.Angle.Between(0, 0, police.body.velocity.x, police.body.velocity.y) + Math.PI / 2;
-    }
-}
+// ─── CALLBACKS ───────────────────────────────────────────────────────────────
 
 function collectMoney(player, money) {
-    money.disableBody(true, true);
+    money.destroy();
     score += 10;
-    scoreText.setText('Score: ' + score);
+    if (score > highScore) highScore = score;
+    scoreText.setText('SCORE: ' + score);
+    highScoreText.setText('BEST: '  + highScore);
 
-    if (moneyBags.countActive(true) === 0) {
-        winLevel();
+    if (moneyGroup.countActive(true) === 0) {
+        triggerWin(game.scene.scenes[0]);
     }
 }
 
-function activatePanicMode(player, diamond) {
-    diamond.disableBody(true, true);
-    isPanicMode = true;
-    
-    // Sirens effect
-    this.tweens.add({
-        targets: policeCars.getChildren(),
-        alpha: 0.5,
-        duration: 200,
-        yoyo: true,
-        repeat: 10
-    });
-
-    if (panicTimer) panicTimer.remove();
-    panicTimer = this.time.delayedCall(10000, () => {
-        isPanicMode = false;
-        policeCars.getChildren().forEach(p => p.clearTint());
-    });
+function collectDiamond(player, diamond) {
+    diamond.destroy();
+    score += 50;
+    scoreText.setText('SCORE: ' + score);
+    activatePanic(game.scene.scenes[0]);
 }
 
-function handlePoliceCollision(player, police) {
-    if (isPanicMode) {
-        police.disableBody(true, true);
+function activatePanic(scene) {
+    isPanic = true;
+    if (panicTimer) panicTimer.remove(false);
+    panicTimer = scene.time.delayedCall(10000, () => {
+        isPanic = false;
+    });
+    // Flash HUD
+    scene.tweens.add({ targets: livesText, alpha: 0.2, duration: 150, yoyo: true, repeat: 20 });
+}
+
+function handlePoliceContact(player, police) {
+    if (isPanic) {
+        // Player eats the police
+        police.destroy();
         score += 200;
-        scoreText.setText('Score: ' + score);
-        
-        // Respawn after 5 seconds
-        this.time.delayedCall(5000, () => {
-            police.enableBody(true, OFFSET_X + 8 * TILE_SIZE, OFFSET_Y + 7 * TILE_SIZE, true, true);
+        scoreText.setText('SCORE: ' + score);
+        // Respawn after delay
+        game.scene.scenes[0].time.delayedCall(5000, () => {
+            const sp = Phaser.Utils.Array.GetRandom([
+                { col: 1, row: 1 }, { col: 16, row: 1 },
+                { col: 1, row: 12 }, { col: 16, row: 12 }
+            ]);
+            policeCars.create(OX + sp.col * TILE + TILE / 2, OY + sp.row * TILE + TILE / 2, 'police')
+                      .setCollideWorldBounds(true)
+                      .setDepth(9);
         });
+        return;
+    }
+
+    // Player loses a life
+    lives--;
+    const hearts = '❤ '.repeat(Math.max(lives, 0)).trim();
+    livesText.setText(lives > 0 ? hearts : '');
+
+    if (lives <= 0) {
+        triggerGameOver(game.scene.scenes[0]);
     } else {
-        lives--;
-        livesText.setText('Lives: ' + lives);
-        
-        if (lives > 0) {
-            player.setPosition(OFFSET_X + 8 * TILE_SIZE, OFFSET_Y + 7 * TILE_SIZE);
-        } else {
-            gameOver();
-        }
+        // Flash player
+        player.setPosition(player._startX, player._startY);
+        player.setVelocity(0);
+        game.scene.scenes[0].tweens.add({ targets: player, alpha: 0.1, duration: 100, yoyo: true, repeat: 6 });
     }
 }
 
-function winLevel() {
-    this.physics.pause();
-    this.add.text(400, 300, 'VOCÊ VENCEU!', { fontSize: '64px', fill: '#0f0' }).setOrigin(0.5);
+function triggerWin(scene) {
+    gameActive = false;
+    scene.physics.pause();
+    const panel = scene.add.rectangle(config.width / 2, config.height / 2, 360, 120, 0x001133, 0.92).setDepth(50);
+    scene.add.text(config.width / 2, config.height / 2 - 22, '🏆  VOCÊ VENCEU!',
+        { font: 'bold 28px monospace', fill: '#00ffcc' }).setOrigin(0.5).setDepth(51);
+    scene.add.text(config.width / 2, config.height / 2 + 18, 'Score final: ' + score,
+        { font: '20px monospace', fill: '#ffffff' }).setOrigin(0.5).setDepth(51);
+    scene.add.text(config.width / 2, config.height / 2 + 44, 'Pressione F5 para jogar de novo',
+        { font: '13px monospace', fill: '#888888' }).setOrigin(0.5).setDepth(51);
 }
 
-function gameOver() {
-    this.physics.pause();
-    this.add.text(400, 300, 'GAME OVER', { fontSize: '64px', fill: '#f00' }).setOrigin(0.5);
+function triggerGameOver(scene) {
+    gameActive = false;
+    scene.physics.pause();
+    const panel = scene.add.rectangle(config.width / 2, config.height / 2, 360, 120, 0x330000, 0.92).setDepth(50);
+    scene.add.text(config.width / 2, config.height / 2 - 22, '🚨  GAME OVER',
+        { font: 'bold 28px monospace', fill: '#ff4444' }).setOrigin(0.5).setDepth(51);
+    scene.add.text(config.width / 2, config.height / 2 + 18, 'Score: ' + score,
+        { font: '20px monospace', fill: '#ffffff' }).setOrigin(0.5).setDepth(51);
+    scene.add.text(config.width / 2, config.height / 2 + 44, 'Pressione F5 para jogar de novo',
+        { font: '13px monospace', fill: '#888888' }).setOrigin(0.5).setDepth(51);
 }
